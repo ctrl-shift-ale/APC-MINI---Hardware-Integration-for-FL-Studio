@@ -1,0 +1,2 @@
+https://www.image-line.com/fl-studio-learning/fl-studio-online-manual/html/midi_scripting.htm
+https://il-group.github.io/FL-Studio-API-Stubs/midi_controller_scripting/tutorials/getting_started/
