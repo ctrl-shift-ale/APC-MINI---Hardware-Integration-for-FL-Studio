@@ -4,8 +4,11 @@
 import device
 import channels
 import playlist
+import mixer 
+import transport
 
 import math
+import time
 
 # APC mini LED colors (velocity values for Note On messages)
 LED_OFF = 0
@@ -31,10 +34,26 @@ BT_PAN = 69
 BT_SEND = 70
 BT_DEVICE = 71
 
+FADER_MODES = ["VOLUME", "PAN", "SEND", "DEVICE"]
+
 # Pad 
 PAD_START = 0
 PAD_END = 63
 GRID_SIZE = 8
+
+# Faders
+FADER_0 = 48
+FADER_1 = 49
+FADER_2 = 50
+FADER_3 = 51
+FADER_4 = 52
+FADER_5 = 53
+FADER_6 = 54
+FADER_7 = 55
+FADER_MASTER = 56
+
+FADER_OFFSET = 48
+N_FADERS = 8
 
 # State system
 STATES = ["DEFAULT","CHANNELS_GRID", "B", "C"]
@@ -93,20 +112,36 @@ horizontal_shift = 0 #which bars are being displayed ( 0 -> beat 0 to 7 ; 1 -> b
 horizontal_offset = 0
 n_channels = 0
 
+current_fader_mode_index = 0 #volume
+
+playing = 0
+playing_his = 0
+
 def OnInit():
     """Called when script is loaded"""
     global current_state_index
+    global current_fader_mode_index
     current_state_index = 0
-    print('AKAI APC mini State Navigator initialized')
-    print(f'Starting in State: {STATES[current_state_index]}')
+    current_fader_mode_index = 0 #volume
+    
+ 
     ChangeState()
     GetGridData()
+
+    time.sleep(0.1)
+
+    UpdateFaderCtrlColour(BT_VOL)
+
+    print('AKAI APC mini State Navigator initialized')
+    print(f'Starting in State: {STATES[current_state_index]}')
 
 def OnDeInit():
     """Called when script is unloaded"""
     print('AKAI APC mini State Navigator deinitialized')
     # Turn off all LEDs
     for note in range(PAD_START, PAD_END + 1):
+        device.midiOutMsg(144, 0, note, LED_OFF)
+    for note in range(BT_UP, BT_DEVICE + 1):
         device.midiOutMsg(144, 0, note, LED_OFF)
 
 def OnProjectLoad(status):
@@ -116,6 +151,8 @@ def OnProjectLoad(status):
         GetGridData()
 
 def OnRefresh(flag):
+    global playing
+    global playing_his
     print(f'Refresh: {flag}')
     n = flag
     found_flags = []
@@ -134,8 +171,20 @@ def OnRefresh(flag):
         GetGridData()
         if current_state_index == 1:
             print("Updating All Pads")
-            ChGrid_UpdateAllPads()
+            ChGrid_UpdateAllGridPads()
 
+    #check if playing
+    playing = transport.isPlaying()
+    if playing_his != playing:
+        print(f'PLAYING IS NOW {playing}')
+        playing_his = playing
+
+def OnUpdateBeatIndicator(val):
+    print(f'update Beat Indicator: {val}')
+    song_pos = transport.getSongPos(4) #SONGLENGTH_STEPS
+    song_bar = transport.getSongPos(3) #SONGLENGTH_STEPS
+    print(f'song bar: {song_bar},  step: {song_pos}')
+    # FINO A QUI
 
 def OnMidiMsg(event):
     """
@@ -145,6 +194,7 @@ def OnMidiMsg(event):
     event.data2: Velocity
     """
     global current_state_index
+    global current_fader_mode_index
     global horizontal_shift
     global horizontal_offset
     
@@ -158,7 +208,7 @@ def OnMidiMsg(event):
             current_state_index = (current_state_index + 1) % len(STATES)
             print(f'State changed to: {STATES[current_state_index]}')
             ChangeState()
-            event.handled = True
+           
         
         # Down button (65) - move backward through states
         #elif event.data1 == BT_DWN:
@@ -173,7 +223,7 @@ def OnMidiMsg(event):
                 if horizontal_shift == 1:
                     horizontal_shift = 0
                     horizontal_offset = 0
-                    ChGrid_UpdateAllPads()
+                    ChGrid_UpdateAllGridPads()
         
         # right button (67) - move right through grid
         elif event.data1 == BT_RIGHT:
@@ -181,13 +231,40 @@ def OnMidiMsg(event):
                 if horizontal_shift == 0:
                     horizontal_shift = 1
                     horizontal_offset = horizontal_shift*GRID_SIZE
-                    ChGrid_UpdateAllPads()
+                    ChGrid_UpdateAllGridPads()
 
         # button belonging to 8x8 pad grid
         elif event.data1 in range(PAD_END + 1):
             if current_state_index == 1:
-                ChGrid_UpdateSinglePad(event.data1)
-                event.handled = True
+                ChGrid_UpdateSingleGridPad(event.data1)
+                
+
+        # fader control button 
+        elif event.data1 in range(BT_VOL,BT_DEVICE + 1):
+            current_fader_mode_index = event.data1 - BT_VOL
+            UpdateFaderCtrlColour(event.data1)
+            print(f'Fader mode changed to: {FADER_MODES[current_fader_mode_index]}')
+            
+
+    # CC messages
+    if event.status == 176:
+        cc_ch = event.data1
+        cc_val = event.data2   
+        if cc_ch in range(FADER_0,FADER_7+1):
+            fader_mode = FADER_MODES[current_fader_mode_index]
+            print(f'midi channel {cc_ch}, val: {cc_val}') 
+            print(f'fader mode: {fader_mode}') 
+            match fader_mode:
+                case "VOLUME":
+                    Channel_Update_Vol(cc_ch,cc_val)
+                case "PAN":
+                    Channel_Update_Pan(cc_ch,cc_val)
+                case "SEND":
+                    Channel_Update_Send(cc_ch,cc_val)
+        elif cc_ch == FADER_MASTER:
+            mixer.setTrackVolume(0, cc_val/127)
+
+    event.handled = True
     
                     
 def ChangeState():
@@ -204,7 +281,7 @@ def ChangeState():
                 device.midiOutMsg(144, 0, note, LED_OFF) 
             
         case "CHANNELS_GRID":
-            ChGrid_UpdateAllPads()
+            ChGrid_UpdateAllGridPads()
         case "B":
             for note in range(BT_UP,BT_DEVICE + 1):
                 device.midiOutMsg(144, 0, note, LED_OFF)
@@ -217,7 +294,7 @@ def ChangeState():
                 device.midiOutMsg(144, 0, note, LED_YELLOW) 
    
 
-def ChGrid_UpdateAllPads():
+def ChGrid_UpdateAllGridPads():
     global horizontal_offset
     global horizontal_shift
     global grid_data
@@ -242,6 +319,14 @@ def ChGrid_UpdateAllPads():
             #print(f'row: {row}, pad: {pad}, note: {note}, color: {color}')
             device.midiOutMsg(144, 0, note, color)
 
+def UpdateFaderCtrlColour(button):
+    if button in range(BT_VOL,BT_DEVICE+1):
+        print(f"update fade ctrl midi note: {button}")
+        for note in range(BT_VOL,BT_DEVICE+1):
+            colour = LED_OFF if note != button else LED_RED
+            print(f'note: {note}, colour: {colour}')
+            device.midiOutMsg(144, 0, note, colour)
+
 def UpdateGrid(row,index):
     """Store new data in grid_data and update FL channel"""
     global horizontal_offset
@@ -254,7 +339,7 @@ def UpdateGrid(row,index):
     #print(f'row: {row}, index: {index}, value: {new_value}')
     return new_value
     
-def ChGrid_UpdateSinglePad(note):
+def ChGrid_UpdateSingleGridPad(note):
     """Store new data in grid_data and update FL channel"""
     global horizontal_offset
     global grid_data
@@ -285,3 +370,16 @@ def GetGridData():
             grid_data[channel][idx] = channels.getGridBit(channel,idx)
             if grid_data[channel][idx] == 1:
                 print(f'beat found @ ch {channel}, pos {idx}')
+
+def Channel_Update_Vol(cc_ch,cc_val):
+    channel = cc_ch - FADER_OFFSET
+    channels.setChannelVolume(channel, cc_val/127)
+
+def Channel_Update_Pan(cc_ch,cc_val):
+    channel = cc_ch - FADER_OFFSET
+    cc_val -= 64
+    channels.setChannelPan(channel, cc_val/64)
+
+def Channel_Update_Send(cc_ch,cc_val):
+    track = cc_ch - FADER_OFFSET + 1 #0 is master track
+    mixer.setTrackVolume(track, cc_val/127)
