@@ -6,6 +6,7 @@ import channels
 import playlist
 import mixer 
 import transport
+import general
 
 import math
 import time
@@ -114,6 +115,12 @@ n_channels = 0
 
 current_fader_mode_index = 0 #volume
 
+timebase = 0
+time_signature = 0
+tempo = 0
+semiquaver_dur_ms = 0
+semiquaver = True
+
 playing = 0
 playing_his = 0
 
@@ -127,6 +134,8 @@ def OnInit():
  
     ChangeState()
     GetGridData()
+    #check time signature
+    GetTimeSignature()
 
     time.sleep(0.1)
 
@@ -146,6 +155,7 @@ def OnDeInit():
 
 def OnProjectLoad(status):
     """Called when a project is loading/loaded""" 
+    global current_state_index
     if status == 100: #project succesfully loaded
         current_state_index = 0
         GetGridData()
@@ -163,6 +173,9 @@ def OnRefresh(flag):
             print(f"found flag: {exp} = {ONREFRESH_FLAGS[i]}")
             found_flags.append(ONREFRESH_FLAGS[i])
             n -= exp
+
+    #check time signature
+    GetTimeSignature()
 
     #check if a pattern has been modified
     if "HW_Dirty_Patterns" in found_flags or "HW_Dirty_Tracks" in found_flags:
@@ -182,8 +195,10 @@ def OnRefresh(flag):
 def OnUpdateBeatIndicator(val):
     print(f'update Beat Indicator: {val}')
     song_pos = transport.getSongPos(4) #SONGLENGTH_STEPS
-    song_bar = transport.getSongPos(3) #SONGLENGTH_STEPS
+    song_bar = transport.getSongPos(3)
     print(f'song bar: {song_bar},  step: {song_pos}')
+    #if val == 2: #ON BEAT
+
     # FINO A QUI
 
 def OnMidiMsg(event):
@@ -358,6 +373,17 @@ def ChGrid_UpdateSingleGridPad(note):
         color = LED_GREEN_BLINK
     device.midiOutMsg(144, 0, note, color)
 
+def GetTimeSignature():
+    global timebase, time_signature, tempo, semiquaver_dur_ms
+
+    timebase = general.getRecPPQ()
+    time_signature = general.getRecPPB()
+    tempo = mixer.getCurrentTempo()/1000
+    semiquaver_dur_ms = (60000/tempo)/4
+    print(f'tempo: {tempo}')
+    print(f'time signature:{timebase},  {time_signature}')
+    print(f'semiquaver_dur_ms:{semiquaver_dur_ms}')
+
 def GetGridData():
     global n_channels
     global grid_data
@@ -369,7 +395,7 @@ def GetGridData():
         for idx in range(0,GRID_SIZE*2):
             grid_data[channel][idx] = channels.getGridBit(channel,idx)
             if grid_data[channel][idx] == 1:
-                print(f'beat found @ ch {channel}, pos {idx}')
+                print(f'note found @ ch {channel}, pos {idx}')
 
 def Channel_Update_Vol(cc_ch,cc_val):
     channel = cc_ch - FADER_OFFSET
