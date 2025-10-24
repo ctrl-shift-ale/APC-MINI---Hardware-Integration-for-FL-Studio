@@ -4,6 +4,7 @@
 import device
 import channels
 import playlist
+import patterns
 import mixer 
 import transport
 import general
@@ -104,8 +105,10 @@ HW_ChannelEvent 	65536 	channel changes"""
 
 DEFAULT_N_CHANNELS = 8
 
+
 #Grid matrix
-grid_data = [[-1 for _ in range(GRID_SIZE*2)] for _ in range(DEFAULT_N_CHANNELS)]
+pattern_max_length = GRID_SIZE*2
+grid_data = [[-1 for _ in range(pattern_max_length)] for _ in range(DEFAULT_N_CHANNELS)]
 # Global state tracker
 current_state_index = 0
 
@@ -123,6 +126,9 @@ semiquaver = True
 
 playing = 0
 playing_his = 0
+
+beat_cnt = 0
+on_beat = False
 
 def OnInit():
     """Called when script is loaded"""
@@ -191,15 +197,28 @@ def OnRefresh(flag):
     if playing_his != playing:
         print(f'PLAYING IS NOW {playing}')
         playing_his = playing
+        if playing == 0:
+            ChGrid_UpdateAllGridPads()
 
 def OnUpdateBeatIndicator(val):
+    global beat_cnt,on_beat
     print(f'update Beat Indicator: {val}')
     song_pos = transport.getSongPos(4) #SONGLENGTH_STEPS
     song_bar = transport.getSongPos(3)
     print(f'song bar: {song_bar},  step: {song_pos}')
-    #if val == 2: #ON BEAT
+    if val != 0:
+        on_beat = True
+        if val == 1: #ON BAR
+            beat_cnt = 0
+        if val == 2: #ON BEAT
+            beat_cnt += 1
+    else:
+        on_beat = False
 
-    # FINO A QUI
+    if current_state_index == 1:
+        UpdatePadPlayIdx()
+
+   
 
 def OnMidiMsg(event):
     """
@@ -308,6 +327,43 @@ def ChangeState():
             for note in range(PAD_START, PAD_END + 1):
                 device.midiOutMsg(144, 0, note, LED_YELLOW) 
    
+def UpdateFaderCtrlColour(button):
+    if button in range(BT_VOL,BT_DEVICE+1):
+        print(f"update fade ctrl midi note: {button}")
+        for note in range(BT_VOL,BT_DEVICE+1):
+            colour = LED_OFF if note != button else LED_RED
+            print(f'note: {note}, colour: {colour}')
+            device.midiOutMsg(144, 0, note, colour)
+
+def UpdatePadPlayIdx():
+    global beat_cnt, grid_data,horizontal_shift,horizontal_offset,on_beat
+    ChGrid_UpdateAllGridPads()      
+    if (beat_cnt <= 1 and horizontal_shift == 0 or
+        beat_cnt > 1 and horizontal_shift == 1):
+        pos_x = (beat_cnt % 2) * 4 
+        if not on_beat: #add off beat offset
+            pos_x += 2
+        for channel in range(0,n_channels):
+            note = ((GRID_SIZE-1-channel) * GRID_SIZE) + (pos_x) # - horizontal_offset)
+            pad_status = grid_data[channel][pos_x+horizontal_offset]
+            if pad_status == 1: #LED_GREEN_BLINK
+                device.midiOutMsg(144, 0, note, LED_RED) 
+            elif pad_status == 0: #LED_GREEN
+                device.midiOutMsg(144, 0, note, LED_YELLOW)
+                
+                
+
+def UpdateGrid(row,index):
+    """Store new data in grid_data and update FL channel"""
+    global horizontal_offset
+    global grid_data
+    index_with_offset = index + horizontal_offset
+    stored_value = grid_data[row][index_with_offset]
+    new_value = 1 - stored_value
+    grid_data[row][index_with_offset] = new_value
+    channels.setGridBit(row,index,new_value)  #setGridBit 	int index, int position, int value, (bool useGlobalIndex* = False) 	- 	Set grid bit value at "position" for channel at "index".
+    #print(f'row: {row}, index: {index}, value: {new_value}')
+    return new_value
 
 def ChGrid_UpdateAllGridPads():
     global horizontal_offset
@@ -334,26 +390,6 @@ def ChGrid_UpdateAllGridPads():
             #print(f'row: {row}, pad: {pad}, note: {note}, color: {color}')
             device.midiOutMsg(144, 0, note, color)
 
-def UpdateFaderCtrlColour(button):
-    if button in range(BT_VOL,BT_DEVICE+1):
-        print(f"update fade ctrl midi note: {button}")
-        for note in range(BT_VOL,BT_DEVICE+1):
-            colour = LED_OFF if note != button else LED_RED
-            print(f'note: {note}, colour: {colour}')
-            device.midiOutMsg(144, 0, note, colour)
-
-def UpdateGrid(row,index):
-    """Store new data in grid_data and update FL channel"""
-    global horizontal_offset
-    global grid_data
-    index_with_offset = index + horizontal_offset
-    stored_value = grid_data[row][index_with_offset]
-    new_value = 1 - stored_value
-    grid_data[row][index_with_offset] = new_value
-    channels.setGridBit(row,index,new_value)  #setGridBit 	int index, int position, int value, (bool useGlobalIndex* = False) 	- 	Set grid bit value at "position" for channel at "index".
-    #print(f'row: {row}, index: {index}, value: {new_value}')
-    return new_value
-    
 def ChGrid_UpdateSingleGridPad(note):
     """Store new data in grid_data and update FL channel"""
     global horizontal_offset
@@ -373,26 +409,16 @@ def ChGrid_UpdateSingleGridPad(note):
         color = LED_GREEN_BLINK
     device.midiOutMsg(144, 0, note, color)
 
-def GetTimeSignature():
-    global timebase, time_signature, tempo, semiquaver_dur_ms
-
-    timebase = general.getRecPPQ()
-    time_signature = general.getRecPPB()
-    tempo = mixer.getCurrentTempo()/1000
-    semiquaver_dur_ms = (60000/tempo)/4
-    print(f'tempo: {tempo}')
-    print(f'time signature:{timebase},  {time_signature}')
-    print(f'semiquaver_dur_ms:{semiquaver_dur_ms}')
-
 def GetGridData():
-    global n_channels
-    global grid_data
+    global n_channels, grid_data, pattern_max_length
+
+    pattern_max_length = patterns.patternMax() #navigation right and left for more than 16 pattern length: to be developed
     n_channels = channels.channelCount() #playlist.getTrackCount()
-    n_rows = n_channels if n_channels > GRID_SIZE else GRID_SIZE
-    grid_data = [[-1 for _ in range(GRID_SIZE*2)] for _ in range(n_rows)]
+    n_rows = n_channels if n_channels > GRID_SIZE else GRID_SIZE #navigation up and down for more than 8 channels: to be developed
+    grid_data = [[-1 for _ in range(pattern_max_length)] for _ in range(n_rows)]
 
     for channel in range(0,n_channels):
-        for idx in range(0,GRID_SIZE*2):
+        for idx in range(0,pattern_max_length):
             grid_data[channel][idx] = channels.getGridBit(channel,idx)
             if grid_data[channel][idx] == 1:
                 print(f'note found @ ch {channel}, pos {idx}')
@@ -409,3 +435,14 @@ def Channel_Update_Pan(cc_ch,cc_val):
 def Channel_Update_Send(cc_ch,cc_val):
     track = cc_ch - FADER_OFFSET + 1 #0 is master track
     mixer.setTrackVolume(track, cc_val/127)
+
+def GetTimeSignature():
+    global timebase, time_signature, tempo, semiquaver_dur_ms
+
+    timebase = general.getRecPPQ()
+    time_signature = general.getRecPPB()
+    tempo = mixer.getCurrentTempo()/1000
+    semiquaver_dur_ms = (60000/tempo)/4
+    print(f'tempo: {tempo}')
+    print(f'time signature:{timebase},  {time_signature}')
+    print(f'semiquaver_dur_ms:{semiquaver_dur_ms}')
