@@ -13,6 +13,22 @@ import general
 import math
 import time
 
+#SETTINGS
+DEBUG = {
+    'on_project_load': True,
+    'on_refresh': True,
+    'on_midi_msg' : False,
+    'on_update_beat_indicator': False,
+    'set_state': False,
+    'patterns_update_pad': False,
+    'patterns_get_data': False,
+    'patterns_update_all_pads': False,
+
+}
+ 
+#  Patterns_UpdateSinglePad Patterns_UpdatePadsPlayIdx
+#Plugins_GetData Plugins_UpdatePadsPluginListUpdateFaderCtrlColour
+
 # APC mini LED colors (velocity values for Note On messages)
 LED_OFF = 0
 LED_GREEN = 1
@@ -137,6 +153,7 @@ on_beat = False
 plugins_data = []
 n_tracks = 16
 
+#EVENTS
 def OnInit():
     """Called when script is loaded"""
     global current_state_index, current_fader_mode_index , n_channels
@@ -144,10 +161,10 @@ def OnInit():
     current_state_index = 0
     current_fader_mode_index = 0 #volume
     
-    SetState()
-    Patterns_GetGridData()
+    set_state()
+    patterns_get_data()
     #check time signature
-    GetTimeSignature()
+    getTimeSignature()
 
     #check n_channels
     n_channels = channels.channelCount() 
@@ -171,14 +188,15 @@ def OnDeInit():
     for note in range(BT_UP, BT_DEVICE + 1):
         device.midiOutMsg(144, 0, note, LED_OFF)
 
-def OnProjectLoad(status):
+def on_project_load(status):
     """Called when a project is loading/loaded""" 
     global current_state_index
     if status == 100: #project succesfully loaded
         current_state_index = 0
-        Patterns_GetGridData()
+        patterns_get_data()
 
-def OnRefresh(flag):
+def on_refresh(flag):
+    """Called when something changed that the script might want to respond to"""
     global playing, playing_his, n_channels, n_tracks
     print(f'Refresh: {flag}')
     n = flag
@@ -192,7 +210,7 @@ def OnRefresh(flag):
             n -= exp
 
     #check time signature
-    GetTimeSignature()
+    getTimeSignature()
 
     #check n_channels
     n_channels = channels.channelCount()
@@ -204,10 +222,10 @@ def OnRefresh(flag):
     if "HW_Dirty_Patterns" in found_flags or "HW_Dirty_Tracks" in found_flags:
         print("found flag HW_Dirty_Patterns or HW_Dirty_Tracks")
         #print(f'current state index: {current_state_index}')
-        Patterns_GetGridData()
+        patterns_get_data()
         if current_state_index == STATE_PATTERNS:
             print("Updating All Pads")
-            Patterns_UpdateAllPads()           
+            patterns_update_all_pads()           
 
     #check if playing
     playing = transport.isPlaying()
@@ -216,7 +234,7 @@ def OnRefresh(flag):
         playing_his = playing
         if playing == 0:
             if current_state_index == STATE_PATTERNS:
-                Patterns_UpdateAllPads()
+                patterns_update_all_pads()
             
 
     # check plugins
@@ -226,29 +244,7 @@ def OnRefresh(flag):
             if current_state_index == STATE_PLUGINS:
                  Plugins_UpdatePadsPluginList()
 
-    
-
-def OnUpdateBeatIndicator(val):
-    global beat_cnt,on_beat
-    print(f'update Beat Indicator: {val}')
-    song_pos = transport.getSongPos(4) #SONGLENGTH_STEPS
-    song_bar = transport.getSongPos(3)
-    print(f'song bar: {song_bar},  step: {song_pos}')
-    if val != 0:
-        on_beat = True
-        if val == 1: #ON BAR
-            beat_cnt = 0
-        if val == 2: #ON BEAT
-            beat_cnt += 1
-    else:
-        on_beat = False
-
-    if current_state_index == 1:
-        Patterns_UpdatePadsPlayIdx()
-
-   
-
-def OnMidiMsg(event):
+def on_midi_msg(event):
     """
     Main MIDI message handler
     event.status: MIDI status byte (144 = Note On)
@@ -269,14 +265,14 @@ def OnMidiMsg(event):
         if event.data1 == BT_STATE:
             current_state_index = (current_state_index + 1) % len(STATES)
             print(f'State changed to: {STATES[current_state_index]}')
-            SetState()
+            set_state()
            
         
         # Down button (65) - move backward through states
         #elif event.data1 == BT_DWN:
         #    current_state_index = (current_state_index - 1) % len(STATES)
         #    print(f'State changed to: {STATES[current_state_index]}')
-        #    SetState()
+        #    set_state()
         #    event.handled = True
         
         # left button (66) - move left through grid
@@ -285,7 +281,7 @@ def OnMidiMsg(event):
                 if patterns_pads_h_shift == 1:
                     patterns_pads_h_shift = 0
                     patterns_pads_h_ofst = 0
-                    Patterns_UpdateAllPads()
+                    patterns_update_all_pads()
         
         # right button (67) - move right through grid
         elif event.data1 == BT_RIGHT:
@@ -293,7 +289,7 @@ def OnMidiMsg(event):
                 if patterns_pads_h_shift == 0:
                     patterns_pads_h_shift = 1
                     patterns_pads_h_ofst = patterns_pads_h_shift*GRID_SIZE
-                    Patterns_UpdateAllPads()
+                    patterns_update_all_pads()
 
         # button belonging to 8x8 pad grid
         elif event.data1 in range(PAD_END + 1):
@@ -328,8 +324,26 @@ def OnMidiMsg(event):
 
     event.handled = True
     
-                    
-def SetState():
+def on_update_beat_indicator(val):
+    global beat_cnt,on_beat
+    print(f'update Beat Indicator: {val}')
+    song_pos = transport.getSongPos(4) #SONGLENGTH_STEPS
+    song_bar = transport.getSongPos(3)
+    print(f'song bar: {song_bar},  step: {song_pos}')
+    if val != 0:
+        on_beat = True
+        if val == 1: #ON BAR
+            beat_cnt = 0
+        if val == 2: #ON BEAT
+            beat_cnt += 1
+    else:
+        on_beat = False
+
+    if current_state_index == 1:
+        Patterns_UpdatePadsPlayIdx()                   
+
+# CONTROLLER INTERFACE: SET LAYER (STATE)
+def set_state():
     """Update all pad LEDs (notes 0-63) based on current state"""
     current_state = STATES[current_state_index]
 
@@ -342,7 +356,7 @@ def SetState():
                 device.midiOutMsg(144, 0, note, LED_OFF) 
             
         case "PATTERNS":
-            Patterns_UpdateAllPads()
+            patterns_update_all_pads()
         case "PLUGINS":
             Plugins_GetData()
             Plugins_UpdatePadsPluginList()
@@ -359,85 +373,12 @@ def SetState():
             for note in range(PAD_START, PAD_END + 1):
                 device.midiOutMsg(144, 0, note, LED_YELLOW) 
 
-def Plugins_GetData():   
-    global n_channels,plugins_data
-    plugins_data = []
-
-    #check n_tracks
-    n_tracks = mixer.trackCount() 
-
-    for track in range(0,n_tracks):
-        
-        plugins_data.append([]) 
-        print(f"Track: {mixer.getTrackName(track)}")
-        for slot in range(0,MAX_PLUGINS_PER_TRACK):
-            plugins_data[track].append["empty",None]
-            if mixer.isTrackPluginValid(track,slot):
-                plugin_name = plugins.getPluginName(track,slot)
-                print(f'\n ---- \ntrack {track}, slot {slot}, name: {plugin_name} ')
-                #gets parameters name and value
-                pars = []
-                for par in range(0,plugins.getParamCount(track,slot)):
-                    par_name = plugins.getParamName(par,track,slot)
-                    par_value = plugins.getParamName(par,track,slot)
-                    print(par_name)
-                    pars.append([par_name,par_value])
-                plugins_data[track][slot] = [plugin_name,[pars]]
-            
-                
-def Plugins_UpdatePadsPluginList():
-    global plugins_data, plugins_pads_v_ofst
-    first_track = plugins_pads_v_ofst
-    last_track = plugins_pads_v_ofst + 3
-    track_to_y_offset = [0,3,6]
-    if last_track > n_tracks:
-        last_track = n_tracks
-    for track in range(first_track,last_track):
-        plugins = plugins_data[track]
-        slot_idx = 0
-        for slot in plugins: #[pluginName , [pars]]
-            y = track_to_y_offset[track]
-            if slot_idx >= GRID_SIZE:
-                y += 1
-            x = slot_idx % GRID_SIZE         
-            note = PadCoordToNote(x,y)
-            if slot[0] == "empty":
-                device.midiOutMsg(144, 0, note, LED_OFF)
-            else:
-                device.midiOutMsg(144, 0, note, LED_YELLOW)
-
-            slot_idx += 1
-
-def UpdateFaderCtrlColour(button):
-    if button in range(BT_VOL,BT_DEVICE+1):
-        print(f"update fade ctrl midi note: {button}")
-        for note in range(BT_VOL,BT_DEVICE+1):
-            colour = LED_OFF if note != button else LED_RED
-            print(f'note: {note}, colour: {colour}')
-            device.midiOutMsg(144, 0, note, colour)
-
-def Patterns_UpdatePadsPlayIdx():
-    global beat_cnt, grid_data,patterns_pads_h_shift,patterns_pads_h_ofst,on_beat
-    Patterns_UpdateAllPads()      
-    if (beat_cnt <= 1 and patterns_pads_h_shift == 0 or
-        beat_cnt > 1 and patterns_pads_h_shift == 1):
-        pos_x = (beat_cnt % 2) * 4 
-        if not on_beat: #add off beat offset
-            pos_x += 2
-        for channel in range(0,n_channels):
-            note = ((GRID_SIZE-1-channel) * GRID_SIZE) + (pos_x) # - patterns_pads_h_ofst)
-            pad_status = grid_data[channel][pos_x+patterns_pads_h_ofst]
-            if pad_status == 1: #LED_GREEN_BLINK
-                device.midiOutMsg(144, 0, note, LED_RED) 
-            elif pad_status == 0: #LED_GREEN
-                device.midiOutMsg(144, 0, note, LED_YELLOW)
-                
-                
-def PadCoordToNote(x,y):
-    return ((GRID_SIZE-1-y) * GRID_SIZE) + (x)
-
-def Patterns_SetPad(row,index):
-    """Store new data in grid_data and update FL channel"""
+# LAYER 1: PATTERNS
+""" duplicate?
+##input from user  
+                             
+def patterns_update_pad(row,index):
+    #Store new data in grid_data and update FL channel
     global patterns_pads_h_ofst
     global grid_data
     index_with_offset = index + patterns_pads_h_ofst
@@ -447,8 +388,22 @@ def Patterns_SetPad(row,index):
     channels.setGridBit(row,index,new_value)  #setGridBit 	int index, int position, int value, (bool useGlobalIndex* = False) 	- 	Set grid bit value at "position" for channel at "index".
     #print(f'row: {row}, index: {index}, value: {new_value}')
     return new_value
+"""
+##query FL for pattern data
+def patterns_get_data():
+    global n_channels, grid_data, pattern_max_length
+    pattern_max_length = patterns.patternMax() #navigation right and left for more than 16 pattern length: to be developed
+    n_rows = n_channels if n_channels > GRID_SIZE else GRID_SIZE #navigation up and down for more than 8 channels: to be developed
+    grid_data = [[-1 for _ in range(pattern_max_length)] for _ in range(n_rows)]
 
-def Patterns_UpdateAllPads():
+    for channel in range(0,n_channels):
+        for idx in range(0,pattern_max_length):
+            grid_data[channel][idx] = channels.getGridBit(channel,idx)
+            if grid_data[channel][idx] == 1:
+                print(f'note found @ ch {channel}, pos {idx}')
+
+##control led colour of pads
+def patterns_update_all_pads():
     global patterns_pads_h_ofst
     global patterns_pads_h_shift
     global grid_data
@@ -492,18 +447,80 @@ def Patterns_UpdateSinglePad(note):
         color = LED_GREEN_BLINK
     device.midiOutMsg(144, 0, note, color)
 
-def Patterns_GetGridData():
-    global n_channels, grid_data, pattern_max_length
+## control led playindex when playing
+def Patterns_UpdatePadsPlayIdx():
+    global beat_cnt, grid_data,patterns_pads_h_shift,patterns_pads_h_ofst,on_beat
+    patterns_update_all_pads()      
+    if (beat_cnt <= 1 and patterns_pads_h_shift == 0 or
+        beat_cnt > 1 and patterns_pads_h_shift == 1):
+        pos_x = (beat_cnt % 2) * 4 
+        if not on_beat: #add off beat offset
+            pos_x += 2
+        for channel in range(0,n_channels):
+            note = ((GRID_SIZE-1-channel) * GRID_SIZE) + (pos_x) # - patterns_pads_h_ofst)
+            pad_status = grid_data[channel][pos_x+patterns_pads_h_ofst]
+            if pad_status == 1: #LED_GREEN_BLINK
+                device.midiOutMsg(144, 0, note, LED_RED) 
+            elif pad_status == 0: #LED_GREEN
+                device.midiOutMsg(144, 0, note, LED_YELLOW)
 
-    pattern_max_length = patterns.patternMax() #navigation right and left for more than 16 pattern length: to be developed
-    n_rows = n_channels if n_channels > GRID_SIZE else GRID_SIZE #navigation up and down for more than 8 channels: to be developed
-    grid_data = [[-1 for _ in range(pattern_max_length)] for _ in range(n_rows)]
+#LAYER 2: PLUGINS
+def Plugins_GetData():   
+    global n_channels,plugins_data
+    plugins_data = []
 
-    for channel in range(0,n_channels):
-        for idx in range(0,pattern_max_length):
-            grid_data[channel][idx] = channels.getGridBit(channel,idx)
-            if grid_data[channel][idx] == 1:
-                print(f'note found @ ch {channel}, pos {idx}')
+    #check n_tracks
+    n_tracks = mixer.trackCount() 
+
+    for track in range(0,n_tracks):
+        
+        plugins_data.append([]) 
+        print(f"Track: {mixer.getTrackName(track)}")
+        for slot in range(0,MAX_PLUGINS_PER_TRACK):
+            plugins_data[track].append["empty",None]
+            if mixer.isTrackPluginValid(track,slot):
+                plugin_name = plugins.getPluginName(track,slot)
+                print(f'\n ---- \ntrack {track}, slot {slot}, name: {plugin_name} ')
+                #gets parameters name and value
+                pars = []
+                for par in range(0,plugins.getParamCount(track,slot)):
+                    par_name = plugins.getParamName(par,track,slot)
+                    par_value = plugins.getParamName(par,track,slot)
+                    print(par_name)
+                    pars.append([par_name,par_value])
+                plugins_data[track][slot] = [plugin_name,[pars]]
+                            
+def Plugins_UpdatePadsPluginList():
+    global plugins_data, plugins_pads_v_ofst
+    first_track = plugins_pads_v_ofst
+    last_track = plugins_pads_v_ofst + 3
+    track_to_y_offset = [0,3,6]
+    if last_track > n_tracks:
+        last_track = n_tracks
+    for track in range(first_track,last_track):
+        plugins = plugins_data[track]
+        slot_idx = 0
+        for slot in plugins: #[pluginName , [pars]]
+            y = track_to_y_offset[track]
+            if slot_idx >= GRID_SIZE:
+                y += 1
+            x = slot_idx % GRID_SIZE         
+            note = PadCoordToNote(x,y)
+            if slot[0] == "empty":
+                device.midiOutMsg(144, 0, note, LED_OFF)
+            else:
+                device.midiOutMsg(144, 0, note, LED_YELLOW)
+
+            slot_idx += 1
+
+# FADERS
+def UpdateFaderCtrlColour(button):
+    if button in range(BT_VOL,BT_DEVICE+1):
+        print(f"update fade ctrl midi note: {button}")
+        for note in range(BT_VOL,BT_DEVICE+1):
+            colour = LED_OFF if note != button else LED_RED
+            print(f'note: {note}, colour: {colour}')
+            device.midiOutMsg(144, 0, note, colour)
 
 def Channel_Update_Vol(cc_ch,cc_val):
     channel = cc_ch - FADER_OFFSET
@@ -518,11 +535,22 @@ def Channel_Update_Send(cc_ch,cc_val):
     track = cc_ch - FADER_OFFSET + 1 #0 is master track
     mixer.setTrackVolume(track, cc_val/127)
 
-def GetTimeSignature():
+# TIME SIGNATURE AND TEMPO
+def getTimeSignature():
     global timebase, time_signature, tempo
-
     timebase = general.getRecPPQ()
     time_signature = general.getRecPPB()
     tempo = mixer.getCurrentTempo()/1000
     print(f'tempo: {tempo}')
     print(f'time signature:{timebase},  {time_signature}')
+
+#CONVERSION FORMULAS
+def PadCoordToNote(x,y):
+    return ((GRID_SIZE-1-y) * GRID_SIZE) + (x)
+
+#DEBUGGING
+def debug_print(message):
+    # Get the name of the caller function
+    caller = inspect.currentframe().f_back.f_code.co_name
+    if DEBUG.get(caller, False):
+        print(f"[{caller}] {message}")
